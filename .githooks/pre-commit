@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# ステージした変更に機密情報があればコミットを止める。
+# 1. Betterleaks: リポジトリ全体の staged diff からトークン・パスワード・API キーなどを探す
+# 2. 補助チェック: リポジトリ全体の追加行からメールアドレスと実名入りのホームのパスを探す
+# 誤検出なら、内容を確かめたうえで git commit --no-verify で通す。
+set -uo pipefail
+
+if ! command -v betterleaks >/dev/null 2>&1; then
+  echo "pre-commit: betterleaks が見つかりません。" >&2
+  exit 1
+fi
+
+failed=0
+
+# --verbose で場所を出し、--redact で秘密の値は伏せる。--validation（提供元への問い合わせ）は付けない
+# .betterleaks.toml（日本語のパスワードのルールを足している）は --config で渡す。環境変数 BETTERLEAKS_CONFIG などより優先させ、ファイルがなければエラーで止めるため
+if ! betterleaks git . --staged --no-banner --redact --verbose --config "$(git rev-parse --show-toplevel)/.betterleaks.toml"; then
+  failed=1
+fi
+
+# 追加行だけを見る（既存の行は再検出しない）。"+++ b/<path>" からファイル名を拾う
+# core.quotepath=false: 日本語のファイル名を "\351\200..." のようにせず、そのまま出す
+# --diff-filter=ACMR: 名前の変更（R）やコピー（C）として扱われたファイルも見る
+hits=$(git -c core.quotepath=false diff --cached -U0 --diff-filter=ACMR | awk '
+  /^\+\+\+ / { file = substr($0, 7); next }
+  /^@@/ { split($3, a, /[+,]/); line = a[2]; next }
+  /^\+/ {
+    s = substr($0, 2)
+    t = s
+    # 例外にする文字列を取り除いてから探す
+    # 予約済みの例示用ドメイン
+    gsub(/[A-Za-z0-9._%+-]+@example\.(com|org|net)/, "", t)
+    # devcontainer の実行ユーザー（node）のホーム
+    gsub(/\/home\/node([^A-Za-z0-9._-]|$)/, " ", t)
+    # Windows の公開フォルダー（Public）のデフォルトのパス
+    gsub(/(C:\\Users\\|\/mnt\/c\/Users\/)Public([^A-Za-z0-9._-]|$)/, " ", t)
+    if (t ~ /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z][A-Za-z]+/ ||
+        t ~ /\/home\/[A-Za-z0-9._-]/ ||
+        t ~ /(C:\\Users\\|\/mnt\/c\/Users\/)[A-Za-z0-9._-]/)
+      printf "  %s:%d: %s\n", file, line, s
+    line++
+  }
+')
+if [ -n "$hits" ]; then
+  echo "pre-commit: 追加行にメールアドレスか実名入りのパスがあります。" >&2
+  echo "$hits" >&2
+  failed=1
+fi
+
+if [ "$failed" -ne 0 ]; then
+  echo "pre-commit: コミットを止めました。確かめたうえで問題なければ git commit --no-verify で通せます。" >&2
+  exit 1
+fi

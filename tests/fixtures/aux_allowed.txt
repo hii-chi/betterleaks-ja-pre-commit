@@ -1,0 +1,7 @@
+const example = "user@example.com";
+const exampleOrg = "admin@example.org";
+const workDir = "/home/node/app";
+const home = "/home/node";
+// C:\Users\Public\Documents
+const pub = "/mnt/c/Users/Public/Desktop";
+const only = ["user@example.com", "/home/node/app"];

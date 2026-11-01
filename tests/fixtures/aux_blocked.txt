@@ -1,0 +1,7 @@
+const reportTo = "someone@mail.invalid";
+const sshDir = "/home/taro/.ssh";
+const dir = "/home/nodejs/app";
+// C:\Users\taro\Documents
+const wsl = "/mnt/c/Users/taro/Desktop";
+const to = ["user@example.com", "someone@mail.invalid"];
+const dirs = ["/home/node/app", "/home/taro/.ssh"];

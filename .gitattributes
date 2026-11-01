@@ -1,0 +1,5 @@
+# Windows で clone しても改行が CRLF にならないようにする（CRLF だとフックが bash で動かない）
+* text=auto eol=lf
+.githooks/* text eol=lf
+*.sh text eol=lf
+*.bats text eol=lf

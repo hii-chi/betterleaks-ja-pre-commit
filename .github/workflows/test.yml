@@ -1,0 +1,92 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # Betterleaks や runner の更新で壊れていないかを週 1 回確かめる
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: shellcheck
+        run: |
+          shellcheck .githooks/pre-commit scripts/install-betterleaks.sh scripts/check-readme-tests.sh
+          shellcheck -s bash tests/test_helper.bash tests/pre-commit.bats
+
+      # README.md のテスト一覧と tests/*.bats の @test の名前が一致しているか
+      - name: Check README test list
+        if: ${{ !cancelled() }}
+        run: bash scripts/check-readme-tests.sh
+
+      # 実行権限がリポジトリに登録されているか（100755 か）を確かめる。
+      # Git は実行権限のないフックを何も言わずに無視するので、clone した人の環境でフックが動かなくなる。
+      # zip の展開などで権限が落ちたまま git add すると 100644 で登録されてしまう。
+      - name: Check executable bits
+        if: ${{ !cancelled() }}
+        run: |
+          failed=0
+          for f in .githooks/pre-commit scripts/install-betterleaks.sh; do
+            mode="$(git ls-files -s -- "$f" | cut -d' ' -f1)"
+            if [ "$mode" = "100755" ]; then
+              echo "ok: $f ($mode)"
+            else
+              echo "::error file=$f::$f が実行権限付き（100755）で登録されていません（${mode:-未登録}）。chmod +x $f && git add $f でコミットしてください。"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+  test:
+    name: test (${{ matrix.os }}, betterleaks ${{ matrix.betterleaks }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux（mawk）・Linux arm64・macOS（BSD awk、フックは標準の bash 3.2）で方言差も確かめる
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+        betterleaks: ["1.9.0"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Betterleaks (SHA256 検証付き)
+        env:
+          BETTERLEAKS_VERSION: ${{ matrix.betterleaks }}
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          scripts/install-betterleaks.sh "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install bats (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      # macOS 標準の /bin/bash（3.2）では、bats が日本語のテスト名を扱えない
+      # （1 文字ずつ 16 進にするとき符号付きになり、"unknown test name" で 0 件しか動かない）。
+      # bats は Homebrew の bash 5 で動かし、フックは利用者の環境に近い /bin/bash で動かす。
+      - name: Install bats and bash (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install bats-core bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          echo "HOOK_SHELL=/bin/bash" >> "$GITHUB_ENV"
+
+      - name: Show versions
+        run: |
+          betterleaks version
+          git --version
+          echo "bash (bats): $(bash --version | head -1)"
+          echo "hook shell: ${HOOK_SHELL:-$(command -v bash)} ($("${HOOK_SHELL:-bash}" --version | head -1))"
+          bats --version
+
+      - name: Run tests
+        run: bats --print-output-on-failure tests

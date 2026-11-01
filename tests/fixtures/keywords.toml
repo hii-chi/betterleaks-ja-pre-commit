@@ -1,0 +1,9 @@
+# Betterleaks の挙動を見張るための設定（v1.9.0 では日本語の keywords でルールが動かない）
+[extend]
+useDefault = true
+
+[[rules]]
+id = "ja-password"
+description = "keywords 付き（動かないことを確かめる用）"
+keywords = ["パスワード", "パスフレーズ", "暗証番号"]
+regex = '''(?:パスワード|パスフレーズ|暗証番号)\s*(?:は|が|:|：|=)\s*[`"'「]?([A-Za-z0-9!#$%&()*+,./:;<=>?@\[\]^_{|}~\\-]{4,})'''
